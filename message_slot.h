@@ -12,9 +12,10 @@
 // Set the message of the device driver
 #define IOCTL_SET_ENC _IOW(MAJOR_NUM, 0, unsigned long)
 
-#define DEVICE_RANGE_NAME "char_dev"
-#define BUF_LEN 80
+#define DEVICE_RANGE_NAME "message_slot"
+#define BUF_LEN 128
 #define DEVICE_FILE_NAME "slot0"
 #define SUCCESS 0
+#define FAILURE -1
 
 #endif

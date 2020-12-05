@@ -2,15 +2,10 @@
 // Created by student on 05/12/2020.
 //
 
-// Declare what kind of code we want
-// from the header files. Defining __KERNEL__
-// and MODULE allows us to access kernel-level
-// code not usually available to userspace programs.
 #undef __KERNEL__
 #define __KERNEL__
 #undef MODULE
 #define MODULE
-
 
 #include <linux/kernel.h>   /* We're doing kernel work */
 #include <linux/module.h>   /* Specifically, a module */
@@ -20,7 +15,7 @@
 
 MODULE_LICENSE("GPL");
 
-//Our custom definitions of IOCTL operations
+//Our custom definitions of IOCTL operations, and more
 #include "message_slot.h"
 
 struct chardev_info
@@ -38,6 +33,19 @@ static char the_message[BUF_LEN];
 
 //Do we need to encrypt?
 static int encryption_flag = 0;
+
+//==================== DEVICE SETUP =============================
+// This structure will hold the functions to be called
+// when a process does something to the device we created
+struct file_operations Fops =
+        {
+                .owner	  = THIS_MODULE,
+                .read           = device_read,
+                .write          = device_write,
+                .open           = device_open,
+                .unlocked_ioctl = device_ioctl,
+                .release        = device_release,
+        };
 
 //================== DEVICE FUNCTIONS ===========================
 static int device_open( struct inode* inode,
@@ -128,49 +136,36 @@ static long device_ioctl( struct   file* file,
     return SUCCESS;
 }
 
-//==================== DEVICE SETUP =============================
-
-// This structure will hold the functions to be called
-// when a process does something to the device we created
-struct file_operations Fops =
-        {
-                .owner	  = THIS_MODULE,
-                .read           = device_read,
-                .write          = device_write,
-                .open           = device_open,
-                .unlocked_ioctl = device_ioctl,
-                .release        = device_release,
-        };
-
 //---------------------------------------------------------------
 // Initialize the module - Register the character device
 static int __init simple_init(void)
 {
-    int rc = -1;
+    int register_result = -1;
     // init dev struct
     memset( &device_info, 0, sizeof(struct chardev_info) );
     spin_lock_init( &device_info.lock );
 
     // Register driver capabilities. Obtain major num
-    rc = register_chrdev( MAJOR_NUM, DEVICE_RANGE_NAME, &Fops );
+    register_result = register_chrdev( MAJOR_NUM, DEVICE_RANGE_NAME, &Fops );
 
     // Negative values signify an error
-    if( rc < 0 )
+    if( register_result < 0 )
     {
-        printk( KERN_ALERT "%s registraion failed for  %d\n",
+        printk( KERN_ERROR "%s registraion failed for  %d\n",
                 DEVICE_FILE_NAME, MAJOR_NUM );
-        return rc;
+        return FAILURE;
     }
+    else {
+        printk( "Registeration is successful. ");
+        return SUCCESS;
+    }
+//    printk( "If you want to talk to the device driver,\n" );
+//    printk( "you have to create a device file:\n" );
+//    printk( "mknod /dev/%s c %d 0\n", DEVICE_FILE_NAME, MAJOR_NUM );
+//    printk( "You can echo/cat to/from the device file.\n" );
+//    printk( "Dont forget to rm the device file and "
+//            "rmmod when you're done\n" );
 
-    printk( "Registeration is successful. ");
-    printk( "If you want to talk to the device driver,\n" );
-    printk( "you have to create a device file:\n" );
-    printk( "mknod /dev/%s c %d 0\n", DEVICE_FILE_NAME, MAJOR_NUM );
-    printk( "You can echo/cat to/from the device file.\n" );
-    printk( "Dont forget to rm the device file and "
-            "rmmod when you're done\n" );
-
-    return 0;
 }
 
 //---------------------------------------------------------------
@@ -184,5 +179,9 @@ static void __exit simple_cleanup(void)
 //---------------------------------------------------------------
 module_init(simple_init);
 module_exit(simple_cleanup);
+
+
+//======================= INTERNAL FUNCTIONS ====================
+
 
 //========================= END OF FILE =========================
