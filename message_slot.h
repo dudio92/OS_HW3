@@ -14,6 +14,7 @@
 
 #define DEVICE_RANGE_NAME "message_slot"
 #define BUF_LEN 128
+#define MAX_MINOR_NUMBER 256
 #define DEVICE_FILE_NAME "slot0"
 #define SUCCESS 0
 #define FAILURE -1

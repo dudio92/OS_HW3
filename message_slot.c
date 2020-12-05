@@ -26,12 +26,13 @@ struct chardev_info
     spinlock_t lock;
 };
 
-
 struct msg
-   //For each message, we will maintain a struct with the complete message and message size
+   //For each message, we will maintain a struct with the complete message
+   //Each message is up to BUF_LEN = 128 bytes, and we need to read/write atomically
+   //msg_size holds the actual message size (<=128)
 {
     char buffer[BUF_LEN];
-    int size;
+    int msg_size;
 };
 
 typedef struct slot_config
@@ -41,6 +42,7 @@ typedef struct slot_config
     unsigned long channel_id;
 } slot_config_t;
 
+static list message_list
 // used to prevent concurent access into the same device
 static int dev_open_flag = 0;
 
