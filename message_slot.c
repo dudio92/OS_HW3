@@ -12,27 +12,40 @@
 #include <linux/fs.h>       /* for register_chrdev */
 #include <linux/uaccess.h>  /* for get_user and put_user */
 #include <linux/string.h>   /* for memset. NOTE - not string.h!*/
+#include <linux/list.h>      /* for maintaining all devices */
 
 MODULE_LICENSE("GPL");
 
 //Our custom definitions of IOCTL operations, and more
 #include "message_slot.h"
 
+//--------------------------Global variables and initializations ----------------//
 struct chardev_info
+    //As we seen on recitation 5 + 6 - taking it as is
 {
     spinlock_t lock;
 };
+
+
+struct msg
+   //For each message, we will maintain a struct with the complete message and message size
+{
+    char buffer[BUF_LEN];
+    int size;
+};
+
+typedef struct slot_config
+{
+    //We will have at most 256 minor numbers (major = 240 hard coded), when each can be up to 2^20 unsigned long.
+    int minor;
+    unsigned long channel_id;
+} slot_config_t;
 
 // used to prevent concurent access into the same device
 static int dev_open_flag = 0;
 
 static struct chardev_info device_info;
 
-// The message the device will give when asked
-static char the_message[BUF_LEN];
-
-//Do we need to encrypt?
-static int encryption_flag = 0;
 
 //==================== DEVICE SETUP =============================
 // This structure will hold the functions to be called
@@ -125,15 +138,23 @@ static long device_ioctl( struct   file* file,
                           unsigned long  ioctl_param )
 {
     // Switch according to the ioctl called
-    if( IOCTL_SET_ENC == ioctl_command_id )
+    if( MSG_SLOT_CHANNEL == ioctl_command_id )
     {
-        // Get the parameter given to ioctl by the process
-        printk( "Invoking ioctl: setting encryption "
-                "flag to %ld\n", ioctl_param );
-        encryption_flag = ioctl_param;
+        if (ioctl_param > 0) {
+            //Command is MSG_SLOT_CHANNEL and PARAM > 0
+            printk("Invoking ioctl: setting message channel to %ld\n", ioctl_param);
+            // DO SOMETHING INTERNAL !! //
+        } else {
+            errno(EINVAL);
+            return FAILURE;
+        }
     }
-
-    return SUCCESS;
+    else {
+        //Unsupported command
+        errno(EINVAL);
+        return FAILURE;
+    }
+    return FAILURE;
 }
 
 //---------------------------------------------------------------
