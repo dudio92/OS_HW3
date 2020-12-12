@@ -19,4 +19,12 @@
 #define SUCCESS 0
 #define FAILURE -1
 
+// Error printing and more
+#define IOCTL_ERROR "IOCTL failed\n"
+#define PARAM_ERROR "At least on argument is missing, Please specify all parameters\n"
+#define OPEN_ERROR "descriptor open error"
+#define WRITE_ERROR "Device write error"
+#define READ_ERROR "Device read error"
+#define STDOUT_ERROR "Writing to STDOUT failed\n"
+
 #endif

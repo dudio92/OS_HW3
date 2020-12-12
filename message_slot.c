@@ -31,6 +31,7 @@ struct msg
    //Each message is up to BUF_LEN = 128 bytes, and we need to read/write atomically
    //msg_size holds the actual message size (<=128)
 {
+    struct list_head list; /* add list_head instead of prev and next */
     char buffer[BUF_LEN];
     int msg_size;
 };
@@ -42,11 +43,16 @@ typedef struct slot_config
     unsigned long channel_id;
 } slot_config_t;
 
-static list message_list
-// used to prevent concurent access into the same device
+// used to prevent concurrent access into the same device
 static int dev_open_flag = 0;
 
 static struct chardev_info device_info;
+
+struct list_head { /* kernel linked list data structure */
+    struct list_head *next, *prev;
+};
+
+
 
 
 //==================== DEVICE SETUP =============================
@@ -205,6 +211,65 @@ module_exit(simple_cleanup);
 
 
 //======================= INTERNAL FUNCTIONS ====================
+// Get a message struct pointer given a file, create it if not matching one is found.
+struct message *get_message_from_file(struct file *file)
+{
 
+    //struct radix_tree_root *rt_root = minor_containers[minor];
+
+    struct message *message;
+
+    //if (channel_id == 0)
+        //return NULL;
+
+    // Try and get message from the tree if already exists
+    message = (struct message *)radix_tree_lookup(rt_root, channel_id);
+
+    // Create it if it does not
+    if (message == NULL)
+    {
+        message = kcalloc(1, sizeof(struct message), GFP_KERNEL);
+        if (!message)
+            return NULL;
+        message->size = 0;
+        radix_tree_insert(rt_root, channel_id, message);
+    }
+    return message;
+}
+
+struct msg *load_message(struct file *file) {
+    //Read minor and channel_id via built in functions
+    int minor = ((slot_config_t *)file->private_data)->minor;
+    unsigned long channel_id = ((slot_config_t *)file->private_data)->channel_id;
+    struct list_head *message_list_ptr = list_head;
+    struct msg *message ;
+
+    if (channel_id == 0) {
+        return NULL;
+    }
+    //Find the message in the linked list
+    message = list_entry(message_list_ptr, struct msg, list);
+
+    // Create it if it does not
+    if (message == NULL)
+    {
+        if (message_list_ptr->next == NULL) {
+            //List isn't initialized yet, create one
+            message = kcalloc(1, sizeof(struct message), GFP_KERNEL);
+            {if (!message) return NULL} ;
+            INIT_LIST_HEAD(&message->list);
+        }
+        else{
+            //List exists, we need to add
+            list_add(&message->list_head, &list);
+
+        }
+    }
+
+
+
+
+
+}
 
 //========================= END OF FILE =========================
