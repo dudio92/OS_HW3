@@ -14,6 +14,7 @@
 #include <linux/string.h>   /* for memset. NOTE - not string.h!*/
 #include <linux/list.h>      /* for maintaining all devices */
 
+
 MODULE_LICENSE("GPL");
 
 //Our custom definitions of IOCTL operations, and more
@@ -26,14 +27,19 @@ struct chardev_info
     spinlock_t lock;
 };
 
-struct msg
+struct list_head { /* kernel linked list data structure */
+    struct list_head *next, *prev;
+};
+
+struct message_channel
    //For each message, we will maintain a struct with the complete message
    //Each message is up to BUF_LEN = 128 bytes, and we need to read/write atomically
    //msg_size holds the actual message size (<=128)
 {
-    struct list_head list; /* add list_head instead of prev and next */
     char buffer[BUF_LEN];
     int msg_size;
+    unsigned long channel_id;
+    struct list_head list; /* add list_head instead of prev and next */
 };
 
 typedef struct slot_config
@@ -41,32 +47,19 @@ typedef struct slot_config
     //We will have at most 256 minor numbers (major = 240 hard coded), when each can be up to 2^20 unsigned long.
     int minor;
     unsigned long channel_id;
+    struct message_channel *message_channel_head;
 } slot_config_t;
 
 // used to prevent concurrent access into the same device
 static int dev_open_flag = 0;
 
-static struct chardev_info device_info;
-
-struct list_head { /* kernel linked list data structure */
-    struct list_head *next, *prev;
-};
 
 
+//Create a fixed size array of structure message
+//Slots number is bound by MAX_MINOR_NUMBER = 256
+struct slot_config * slots__array[MAX_MINOR_NUMBER];
 
 
-//==================== DEVICE SETUP =============================
-// This structure will hold the functions to be called
-// when a process does something to the device we created
-struct file_operations Fops =
-        {
-                .owner	  = THIS_MODULE,
-                .read           = device_read,
-                .write          = device_write,
-                .open           = device_open,
-                .unlocked_ioctl = device_ioctl,
-                .release        = device_release,
-        };
 
 //================== DEVICE FUNCTIONS ===========================
 static int device_open( struct inode* inode,
@@ -124,21 +117,39 @@ return -EINVAL;
 // the device file attempts to write to it
 static ssize_t device_write( struct file*       file,
                              const char __user* buffer,
-size_t             length,
-        loff_t*            offset)
+                             size_t             length,
+                             loff_t*            offset)
 {
-int i;
-printk("Invoking device_write(%p,%ld)\n", file, length);
-for( i = 0; i < length && i < BUF_LEN; ++i )
-{
-get_user(the_message[i], &buffer[i]);
-if( 1 == encryption_flag )
-the_message[i] += 1;
+    struct message_channel *message_channel = get_message_from_file(file);
+    int i;
+
+    if (message == NULL || buffer == NULL) {
+        perror(EINVAL);
+        return(FAILURE);
+    }
+    if (length > BUF_LEN || length == 0) {
+        perror(EMSGSIZE);
+        return(FAILURE);
+    }
+
+    for (i = 0; i < length && i < BUF_LEN; ++i)
+    {
+        get_user(message->buffer[i], &buffer[i]);
+    }
+
+    if (i == length) {
+        //Save how much bytes did we actually load into buffer
+    message->size = i;
+    }
+    else {
+     //Didn't succeed writing the complete message
+    // Make writing an atomic operation
+    message->size = 0;
+    }
+    //Return #bytes loaded to buffer
+    return i;
 }
 
-// return the number of input characters used
-return i;
-}
 
 //----------------------------------------------------------------
 static long device_ioctl( struct   file* file,
@@ -206,8 +217,7 @@ static void __exit simple_cleanup(void)
 }
 
 //---------------------------------------------------------------
-module_init(simple_init);
-module_exit(simple_cleanup);
+
 
 
 //======================= INTERNAL FUNCTIONS ====================
@@ -237,18 +247,32 @@ struct message *get_message_from_file(struct file *file)
     return message;
 }
 
+//Logic: When gets a slot ID, go to the relevant array index and looks for the message ID in it's linked list
+//If there is no such list, create it
 struct msg *load_message(struct file *file) {
     //Read minor and channel_id via built in functions
     int minor = ((slot_config_t *)file->private_data)->minor;
     unsigned long channel_id = ((slot_config_t *)file->private_data)->channel_id;
     struct list_head *message_list_ptr = list_head;
-    struct msg *message ;
+    struct message_channel *message_channel ;
 
     if (channel_id == 0) {
         return NULL;
     }
-    //Find the message in the linked list
-    message = list_entry(message_list_ptr, struct msg, list);
+    //Get the channel and message  node from the slots_array
+    message_channel = slots_array[channel_id] ;
+    if (message_channel->list.next == NULL) {
+        //No data structure available for this device minor number, init a list linked to his minor id
+        //INIT_LIST_HEAD(&message->list);
+        message_channel = kcalloc(1, sizeof(struct message_channel), GFP_KERNEL);
+        {if (!message) return NULL ;}
+        message_channel->list = LIST_HEAD_INIT(message_channel->list);
+    }
+    else {
+        //Data structure linked to it's minor id exists, add to its linked list
+        list_add(&message_channel->list_head, &(message_channel->list));
+
+    }
 
     // Create it if it does not
     if (message == NULL)
@@ -262,14 +286,25 @@ struct msg *load_message(struct file *file) {
         else{
             //List exists, we need to add
             list_add(&message->list_head, &list);
-
         }
     }
 
-
-
-
-
 }
 
+
+//==================== DEVICE SETUP =============================
+// This structure will hold the functions to be called
+// when a process does something to the device we created
+struct file_operations Fops =
+        {
+                .owner = THIS_MODULE,
+                .read = device_read,
+                .write = device_write,
+                .open = device_open,
+                .release = device_release,
+                .unlocked_ioctl = device_ioctl,
+
+        };
 //========================= END OF FILE =========================
+module_init(simple_init);
+module_exit(simple_cleanup);

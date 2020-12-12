@@ -2,8 +2,9 @@
 // Created by student on 05/12/2020.
 //
 
-#ifndef message_slot
-#define message_slot
+#ifndef MESSAGE_SLOT_H
+#define MESSAGE_SLOT_H
+
 #include <linux/ioctl.h>
 
 //Predefine major num for ioctl //
