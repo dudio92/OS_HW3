@@ -14,21 +14,15 @@
 #include <linux/string.h>   /* for memset. NOTE - not string.h!*/
 #include <linux/list.h>      /* for maintaining all devices */
 #include <linux/slab.h>
-#include <backtrace.h>
-
 
 MODULE_LICENSE("GPL");
 
 //Our custom definitions of IOCTL operations, and more
 #include "message_slot.h"
-#define LIST_HEAD_INIT(name) { &(name), &(name) }
+
 
 //--------------------------Global variables and initializations ----------------//
-struct chardev_info
-    //As we seen on recitation 5 + 6 - taking it as is
-{
-    spinlock_t lock;
-};
+
 
 struct message_channel
    //For each message, we will maintain a struct with the complete message
@@ -51,7 +45,7 @@ typedef struct slot_config
 } slot_config_t;
 
 // used to prevent concurrent access into the same device
-static int dev_open_flag = 0;
+
 
 
 
@@ -59,22 +53,22 @@ static int dev_open_flag = 0;
 //Slots number is bound by MAX_MINOR_NUMBER = 256
 struct slot_config * slots_array[MAX_MINOR_NUMBER];
 
-struct message_channel* get_message_from_list(struct file *file, struct slot_config *slot_config,unsigned long msg_channel_id) {
+struct message_channel* get_message_from_list(struct slot_config *slot_config,unsigned long msg_channel_id) {
     struct message_channel *list_message;
     struct list_head *ptr;
-    int counter = 0 ;
 
     list_for_each(ptr, slot_config->message_channel_head) {
         /* my points to the structure in which the list is embedded */
         list_message = list_entry(ptr, struct message_channel, message_channel_head);
-        printk("Slot number %d {Channel ID:%lu, Message:%s}\n",slot_config->minor,list_message->channel_id,list_message->buffer);
-        counter++;
+        printk("Slot number %d {Channel ID:%lu, Message:%s}\n", slot_config->minor, list_message->channel_id,
+               list_message->buffer);
         if (list_message->channel_id == msg_channel_id) {
-            return list_message ;
+            return list_message;
         }
+    }
         //Didn't find this channel on this minor, list_message is NULL
         return list_message;
-    }
+
 }
 
 
@@ -89,7 +83,7 @@ struct message_channel *load_message(struct file *file) {
     if (channel_id == 0) {
         return NULL;
     }
-    get_message_channel = get_message_from_list(file,(slot_config_t *)file->private_data,channel_id) ;
+    get_message_channel = get_message_from_list((slot_config_t *)file->private_data,channel_id) ;
 
 
     if (get_message_channel == NULL) {
@@ -131,11 +125,11 @@ slot_config_t* create_slot_config( struct inode *inode,
 static int device_open( struct inode* inode,
                         struct file*  file )
 {
-    unsigned long flags; // for spinlock
     printk("Invoking device_open(%p)\n", file);
     //When device_open is being called, this function creates new slots_config struct, allocates memory and sets its fields
     //Call slots_config constructor create_slot_config
-    slot_config_t *slot_config = create_slot_config(inode,file);
+    slot_config_t *slot_config;
+    slot_config = create_slot_config(inode,file);
     // now slot_config struct is ready to be added into slots_array
     //slots_array[slot_config.minor] = &slot_config ;
     // Check if slot_config linked list is initialized, and if not - create it
@@ -151,8 +145,7 @@ static int device_open( struct inode* inode,
 static int device_release( struct inode* inode,
                            struct file*  file)
 {
-    unsigned long flags; // for spinlock
-    printk("Invoking device_release(%p,%p)\n", inode, file);
+
 
     // ready for our next caller
     return SUCCESS;
@@ -233,6 +226,17 @@ static long device_ioctl( struct   file* file,
     return FAILURE;
 }
 
+struct file_operations Fops =
+        {
+                .owner = THIS_MODULE,
+                .read = device_read,
+                .write = device_write,
+                .open = device_open,
+                .release = device_release,
+                .unlocked_ioctl = device_ioctl,
+
+        };
+
 //---------------------------------------------------------------
 // Initialize the module - Register the character device
 static int __init simple_init(void)
@@ -312,16 +316,7 @@ static void __exit simple_cleanup(void)
 //==================== DEVICE SETUP =============================
 // This structure will hold the functions to be called
 // when a process does something to the device we created
-struct file_operations Fops =
-        {
-                .owner = THIS_MODULE,
-                .read = device_read,
-                .write = device_write,
-                .open = device_open,
-                .release = device_release,
-                .unlocked_ioctl = device_ioctl,
 
-        };
 //========================= END OF FILE =========================
 module_init(simple_init);
 module_exit(simple_cleanup);
