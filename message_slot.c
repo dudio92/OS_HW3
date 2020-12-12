@@ -13,22 +13,20 @@
 #include <linux/uaccess.h>  /* for get_user and put_user */
 #include <linux/string.h>   /* for memset. NOTE - not string.h!*/
 #include <linux/list.h>      /* for maintaining all devices */
+#include <linux/slab.h>
 
 
 MODULE_LICENSE("GPL");
 
 //Our custom definitions of IOCTL operations, and more
 #include "message_slot.h"
+#define LIST_HEAD_INIT(name) { &(name), &(name) }
 
 //--------------------------Global variables and initializations ----------------//
 struct chardev_info
     //As we seen on recitation 5 + 6 - taking it as is
 {
     spinlock_t lock;
-};
-
-struct list_head { /* kernel linked list data structure */
-    struct list_head *next, *prev;
 };
 
 struct message_channel
@@ -39,7 +37,7 @@ struct message_channel
     char buffer[BUF_LEN];
     int msg_size;
     unsigned long channel_id;
-    struct list_head list; /* add list_head instead of prev and next */
+    struct list_head channels_list_head; /* add list_head instead of prev and next */
 };
 
 typedef struct slot_config
@@ -57,7 +55,36 @@ static int dev_open_flag = 0;
 
 //Create a fixed size array of structure message
 //Slots number is bound by MAX_MINOR_NUMBER = 256
-struct slot_config * slots__array[MAX_MINOR_NUMBER];
+struct slot_config * slots_array[MAX_MINOR_NUMBER];
+
+
+struct msg *load_message(struct file *file) {
+    //Read minor and channel_id via built in functions, and read it from the slot_config_t pointer
+    int minor = ((slot_config_t *)file->private_data)->minor;
+    unsigned long channel_id = ((slot_config_t *)file->private_data)->channel_id;
+    //Structs to hold the head and the new message slot
+    struct message_channel *new_message_channel ;
+    struct message_channel *message_channel_head_from_array ;
+
+
+    if (channel_id == 0) {
+        return NULL;
+    }
+    //message_channel_head_from_array = slots_array[channel_id]->message_channel_head ;
+    if (slots_array[channel_id] == NULL) {
+        //No data structure available for this device minor number, init a list linked to his minor id
+        new_message_channel->channels_list_head = LIST_HEAD_INIT(message_channel->list);
+        //INIT_LIST_HEAD(&message->list);
+        new_message_channel = kcalloc(1, sizeof(struct message_channel), GFP_KERNEL);
+        {if (!new_message_channel) return NULL ;}
+
+    }
+    else {
+        //Data structure linked to it's minor id exists, add to its linked list
+        list_add(&new_message_channel->messa, &message_channel->list_head);
+
+    }
+}
 
 
 
@@ -222,74 +249,35 @@ static void __exit simple_cleanup(void)
 
 //======================= INTERNAL FUNCTIONS ====================
 // Get a message struct pointer given a file, create it if not matching one is found.
-struct message *get_message_from_file(struct file *file)
-{
-
-    //struct radix_tree_root *rt_root = minor_containers[minor];
-
-    struct message *message;
-
-    //if (channel_id == 0)
-        //return NULL;
-
-    // Try and get message from the tree if already exists
-    message = (struct message *)radix_tree_lookup(rt_root, channel_id);
-
-    // Create it if it does not
-    if (message == NULL)
-    {
-        message = kcalloc(1, sizeof(struct message), GFP_KERNEL);
-        if (!message)
-            return NULL;
-        message->size = 0;
-        radix_tree_insert(rt_root, channel_id, message);
-    }
-    return message;
-}
+//struct message *get_message_from_file(struct file *file)
+//{
+//
+//    //struct radix_tree_root *rt_root = minor_containers[minor];
+//
+//    struct message *message;
+//
+//    //if (channel_id == 0)
+//        //return NULL;
+//
+//    // Try and get message from the tree if already exists
+//    message = (struct message *)radix_tree_lookup(rt_root, channel_id);
+//
+//    // Create it if it does not
+//    if (message == NULL)
+//    {
+//        message = kcalloc(1, sizeof(struct message), GFP_KERNEL);
+//        if (!message)
+//            return NULL;
+//        message->size = 0;
+//        radix_tree_insert(rt_root, channel_id, message);
+//    }
+//    return message;
+//}
 
 //Logic: When gets a slot ID, go to the relevant array index and looks for the message ID in it's linked list
 //If there is no such list, create it
-struct msg *load_message(struct file *file) {
-    //Read minor and channel_id via built in functions
-    int minor = ((slot_config_t *)file->private_data)->minor;
-    unsigned long channel_id = ((slot_config_t *)file->private_data)->channel_id;
-    struct list_head *message_list_ptr = list_head;
-    struct message_channel *message_channel ;
 
-    if (channel_id == 0) {
-        return NULL;
-    }
-    //Get the channel and message  node from the slots_array
-    message_channel = slots_array[channel_id] ;
-    if (message_channel->list.next == NULL) {
-        //No data structure available for this device minor number, init a list linked to his minor id
-        //INIT_LIST_HEAD(&message->list);
-        message_channel = kcalloc(1, sizeof(struct message_channel), GFP_KERNEL);
-        {if (!message) return NULL ;}
-        message_channel->list = LIST_HEAD_INIT(message_channel->list);
-    }
-    else {
-        //Data structure linked to it's minor id exists, add to its linked list
-        list_add(&message_channel->list_head, &(message_channel->list));
 
-    }
-
-    // Create it if it does not
-    if (message == NULL)
-    {
-        if (message_list_ptr->next == NULL) {
-            //List isn't initialized yet, create one
-            message = kcalloc(1, sizeof(struct message), GFP_KERNEL);
-            {if (!message) return NULL} ;
-            INIT_LIST_HEAD(&message->list);
-        }
-        else{
-            //List exists, we need to add
-            list_add(&message->list_head, &list);
-        }
-    }
-
-}
 
 
 //==================== DEVICE SETUP =============================
