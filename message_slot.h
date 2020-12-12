@@ -7,6 +7,7 @@
 
 #include <linux/ioctl.h>
 
+
 //Predefine major num for ioctl //
 #define MAJOR_NUM 240
 
@@ -27,5 +28,6 @@
 #define WRITE_ERROR "Device write error"
 #define READ_ERROR "Device read error"
 #define STDOUT_ERROR "Writing to STDOUT failed\n"
+#define KMALLOC_ERROR "kmalloc function failed"
 
 #endif

@@ -14,6 +14,7 @@
 #include <linux/string.h>   /* for memset. NOTE - not string.h!*/
 #include <linux/list.h>      /* for maintaining all devices */
 #include <linux/slab.h>
+#include <backtrace.h>
 
 
 MODULE_LICENSE("GPL");
@@ -37,7 +38,8 @@ struct message_channel
     char buffer[BUF_LEN];
     int msg_size;
     unsigned long channel_id;
-    struct list_head channels_list_head; /* add list_head instead of prev and next */
+    //struct list_head channels_list_head; /* add list_head instead of prev and next */
+    struct list_head *message_channel_head;
 };
 
 typedef struct slot_config
@@ -45,7 +47,7 @@ typedef struct slot_config
     //We will have at most 256 minor numbers (major = 240 hard coded), when each can be up to 2^20 unsigned long.
     int minor;
     unsigned long channel_id;
-    struct message_channel *message_channel_head;
+    struct list_head *message_channel_head;
 } slot_config_t;
 
 // used to prevent concurrent access into the same device
@@ -57,33 +59,70 @@ static int dev_open_flag = 0;
 //Slots number is bound by MAX_MINOR_NUMBER = 256
 struct slot_config * slots_array[MAX_MINOR_NUMBER];
 
+struct message_channel* get_message_from_list(struct file *file, struct slot_config *slot_config,unsigned long msg_channel_id) {
+    struct message_channel *list_message;
+    struct list_head *ptr;
+    int counter = 0 ;
 
-struct msg *load_message(struct file *file) {
-    //Read minor and channel_id via built in functions, and read it from the slot_config_t pointer
+    list_for_each(ptr, slot_config->message_channel_head) {
+        /* my points to the structure in which the list is embedded */
+        list_message = list_entry(ptr, struct message_channel, message_channel_head);
+        printk("Slot number %d {Channel ID:%lu, Message:%s}\n",slot_config->minor,list_message->channel_id,list_message->buffer);
+        counter++;
+        if (list_message->channel_id == msg_channel_id) {
+            return list_message ;
+        }
+        //Didn't find this channel on this minor, list_message is NULL
+        return list_message;
+    }
+}
+
+
+struct message_channel *load_message(struct file *file) {
+    //We get the minor and channel via the file private data pointer we set on device_open function
+    //slot_config already init in device_open
     int minor = ((slot_config_t *)file->private_data)->minor;
     unsigned long channel_id = ((slot_config_t *)file->private_data)->channel_id;
-    //Structs to hold the head and the new message slot
-    struct message_channel *new_message_channel ;
-    struct message_channel *message_channel_head_from_array ;
 
+    struct message_channel *get_message_channel ;
 
     if (channel_id == 0) {
         return NULL;
     }
-    //message_channel_head_from_array = slots_array[channel_id]->message_channel_head ;
-    if (slots_array[channel_id] == NULL) {
-        //No data structure available for this device minor number, init a list linked to his minor id
-        new_message_channel->channels_list_head = LIST_HEAD_INIT(message_channel->list);
-        //INIT_LIST_HEAD(&message->list);
-        new_message_channel = kcalloc(1, sizeof(struct message_channel), GFP_KERNEL);
-        {if (!new_message_channel) return NULL ;}
+    get_message_channel = get_message_from_list(file,(slot_config_t *)file->private_data,channel_id) ;
 
-    }
-    else {
-        //Data structure linked to it's minor id exists, add to its linked list
-        list_add(&new_message_channel->messa, &message_channel->list_head);
 
+    if (get_message_channel == NULL) {
+        //No channel id node exists for this minor
+        get_message_channel = kcalloc(1, sizeof(struct message_channel), GFP_KERNEL);
+        if (!get_message_channel) {
+            return NULL;
+        }
+        get_message_channel->msg_size = 0;
+        list_add(get_message_channel->message_channel_head,slots_array[minor]->message_channel_head);
     }
+
+    return get_message_channel ;
+}
+
+
+slot_config_t* create_slot_config( struct inode *inode,
+                                  struct file*  file)
+{
+    //Init a new slot_config struct and return a pointer to it
+    //For memory handling, add the slot_config struct to the private data field of a driver
+    //https://www.oreilly.com/library/view/linux-device-drivers/0596000081/ch03s04.html
+
+    slot_config_t *slot_config_node = kmalloc(sizeof(slot_config_t), GFP_KERNEL);
+    if (!slot_config_node) {
+        //perror(KMALLOC_ERROR);
+    }
+    slot_config_node->minor = iminor(inode);
+    slot_config_node->channel_id = 0;
+    //device private data will hold a slot_config struct pointer
+    file->private_data = (void *)slot_config_node;
+
+    return slot_config_node;
 }
 
 
@@ -94,17 +133,17 @@ static int device_open( struct inode* inode,
 {
     unsigned long flags; // for spinlock
     printk("Invoking device_open(%p)\n", file);
-
-    // We don't want to talk to two processes at the same time
-    spin_lock_irqsave(&device_info.lock, flags);
-    if( 1 == dev_open_flag )
-    {
-        spin_unlock_irqrestore(&device_info.lock, flags);
-        return -EBUSY;
+    //When device_open is being called, this function creates new slots_config struct, allocates memory and sets its fields
+    //Call slots_config constructor create_slot_config
+    slot_config_t *slot_config = create_slot_config(inode,file);
+    // now slot_config struct is ready to be added into slots_array
+    //slots_array[slot_config.minor] = &slot_config ;
+    // Check if slot_config linked list is initialized, and if not - create it
+    if (slots_array[slot_config->minor] == NULL) {
+        slots_array[slot_config->minor] = slot_config ;
+        //Init it's linked list
+        INIT_LIST_HEAD(slots_array[slot_config->minor]->message_channel_head);
     }
-
-    ++dev_open_flag;
-    spin_unlock_irqrestore(&device_info.lock, flags);
     return SUCCESS;
 }
 
@@ -116,9 +155,6 @@ static int device_release( struct inode* inode,
     printk("Invoking device_release(%p,%p)\n", inode, file);
 
     // ready for our next caller
-    spin_lock_irqsave(&device_info.lock, flags);
-    --dev_open_flag;
-    spin_unlock_irqrestore(&device_info.lock, flags);
     return SUCCESS;
 }
 
@@ -131,10 +167,6 @@ size_t       length,
         loff_t*      offset )
 {
 // read doesnt really do anything (for now)
-printk( "Invocing device_read(%p,%ld) - "
-"operation not supported yet\n"
-"(last written - %s)\n",
-file, length, the_message );
 //invalid argument error
 return -EINVAL;
 }
@@ -147,31 +179,31 @@ static ssize_t device_write( struct file*       file,
                              size_t             length,
                              loff_t*            offset)
 {
-    struct message_channel *message_channel = get_message_from_file(file);
+    struct message_channel *message_channel = load_message(file);
     int i;
 
-    if (message == NULL || buffer == NULL) {
-        perror(EINVAL);
+    if (message_channel == NULL || buffer == NULL) {
+        //perror(EINVAL);
         return(FAILURE);
     }
     if (length > BUF_LEN || length == 0) {
-        perror(EMSGSIZE);
+        //perror(EMSGSIZE);
         return(FAILURE);
     }
 
     for (i = 0; i < length && i < BUF_LEN; ++i)
     {
-        get_user(message->buffer[i], &buffer[i]);
+        get_user(message_channel->buffer[i], &buffer[i]);
     }
 
     if (i == length) {
         //Save how much bytes did we actually load into buffer
-    message->size = i;
+        message_channel->msg_size = i;
     }
     else {
      //Didn't succeed writing the complete message
     // Make writing an atomic operation
-    message->size = 0;
+        message_channel->msg_size = 0;
     }
     //Return #bytes loaded to buffer
     return i;
@@ -191,13 +223,11 @@ static long device_ioctl( struct   file* file,
             printk("Invoking ioctl: setting message channel to %ld\n", ioctl_param);
             // DO SOMETHING INTERNAL !! //
         } else {
-            errno(EINVAL);
             return FAILURE;
         }
     }
     else {
         //Unsupported command
-        errno(EINVAL);
         return FAILURE;
     }
     return FAILURE;
@@ -209,8 +239,7 @@ static int __init simple_init(void)
 {
     int register_result = -1;
     // init dev struct
-    memset( &device_info, 0, sizeof(struct chardev_info) );
-    spin_lock_init( &device_info.lock );
+
 
     // Register driver capabilities. Obtain major num
     register_result = register_chrdev( MAJOR_NUM, DEVICE_RANGE_NAME, &Fops );
@@ -218,7 +247,7 @@ static int __init simple_init(void)
     // Negative values signify an error
     if( register_result < 0 )
     {
-        printk( KERN_ERROR "%s registraion failed for  %d\n",
+        printk("%s registraion failed for  %d\n",
                 DEVICE_FILE_NAME, MAJOR_NUM );
         return FAILURE;
     }
